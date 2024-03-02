@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+
 let keys = []; // In-memory storage for RSA keys
 
 function generateRSAKeyPair() {
@@ -17,7 +18,9 @@ function generateRSAKeyPair() {
             if (err) reject(err);
             else {
                 const kid = crypto.randomBytes(16).toString('hex');
-                const keyPair = { kid, publicKey, privateKey, alg: 'RS256' };
+                // Set the expiry to 1 hour from now for simplicity
+                const expiry = Date.now() + (60 * 60 * 1000); 
+                const keyPair = { kid, publicKey, privateKey, alg: 'RS256', exp: expiry };
                 keys.push(keyPair); // Store the key pair
                 resolve(keyPair);
             }
@@ -26,25 +29,26 @@ function generateRSAKeyPair() {
 }
 
 function getPublicKeysForJWKS() {
-    return keys.map(({ kid, publicKey, alg }) => {
-        const pem = publicKey.toString();
-        const match = pem.match(/-----BEGIN PUBLIC KEY-----\r?\n([A-Za-z0-9+/=\r\n]+)-----END PUBLIC KEY-----/);
-        if (!match) {
-            throw new Error('Could not parse public key');
-        }
-        const pubKeyBase64 = match[1].replace(/[\r\n]+/g, '');
-        const pubKeyBuffer = Buffer.from(pubKeyBase64, 'base64');
-        const pubKeyComponents = crypto.KeyObject.from(pem, 'spki', { format: 'der' }).export({ format: 'jwk' });
+    // Filter out expired keys
+    const nonExpiredKeys = keys.filter(key => key.exp > Date.now());
+    return nonExpiredKeys.map(({ kid, publicKey, alg }) => {
+        const keyObj = crypto.createPublicKey(publicKey);
+        const jwk = keyObj.export({ format: 'jwk' });
 
         return {
             kty: 'RSA',
             kid,
             alg,
             use: 'sig',
-            n: pubKeyComponents.n,
-            e: pubKeyComponents.e,
+            n: base64url(jwk.n), // Ensure n is base64 URL encoded without padding
+            e: base64url(jwk.e), // Ensure e is base64 URL encoded without padding
         };
     });
 }
 
+function base64url(input) {
+    return input.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
 module.exports = { generateRSAKeyPair, getPublicKeysForJWKS };
+
