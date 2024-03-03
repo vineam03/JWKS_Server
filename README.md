@@ -1,4 +1,9 @@
-This program sets up a server which issues out tokens.
+This program sets up a RESTful JWKS server which issues out public keys to verfiy JWTs. 
+
+Features include:
+- Key Expiry
+- Authentication Endpoint
+- JWT Handler
 
 The program is divided into these following files: 
 
