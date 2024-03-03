@@ -1,3 +1,10 @@
+/*
+Name: Vin Eamboriboon
+Section/Course: CSCE 3550.002
+Date: 3/2/2024
+Description: Test suite for keyStore.js
+*/
+
 const { generateRSAKeyPair, getPublicKeysForJWKS } = require('../keyStore');
 
 describe('Key Store', () => {

@@ -1,30 +1,42 @@
+/*
+Name: Vin Eamboriboon
+Section/Course: CSCE 3550.002
+Date: 3/2/2024
+Description: Test suite for app.js
+*/
+
+
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
-const app = require('../app'); // Modify the path according to the actual location
+const app = require('../app');
+
 
 describe('Express App', () => {
+    
+  //This test ensures that the POST request returns a status of 200
     test('POST /auth should respond with a JWT', async () => {
         const response = await request(app)
             .post('/auth')
-            .send({}); // Add any necessary body or query parameters
+            .send({});
         expect(response.statusCode).toBe(200);
         expect(response.body).toHaveProperty('token');
     });
-
+  
+  //This test ensures that the GET request returns a status of 200
     test('GET /.well-known/jwks.json should respond with JWKS', async () => {
         const response = await request(app).get('/.well-known/jwks.json');
         expect(response.statusCode).toBe(200);
         expect(response.body).toHaveProperty('keys');
-        // You could add more checks to validate the structure of the keys
+      
     });
-
+  //Expired tokens should return a true
     test('POST /auth with expired=true should respond with an expired JWT', async () => {
         const response = await request(app)
             .post('/auth?expired=true')
             .send({});
         expect(response.statusCode).toBe(200);
         expect(response.body).toHaveProperty('token');
-        // Verify the token is expired
+        
         const decodedToken = jwt.decode(response.body.token, { complete: true });
         expect(decodedToken.payload.exp).toBeLessThan(Math.floor(Date.now() / 1000));
     });
@@ -34,11 +46,11 @@ describe('Express App', () => {
         expect(response.statusCode).toBe(200);
         expect(response.body).toHaveProperty('keys');
 
-        // Check that none of the keys are expired
+       
         const currentTime = Math.floor(Date.now() / 1000);
         response.body.keys.forEach(key => {
             expect(key).toHaveProperty('kid');
-            // Assuming 'exp' is included in your JWKS (which is not standard)
+           
             if (key.exp) {
                 expect(key.exp).toBeGreaterThan(currentTime);
             }
@@ -48,7 +60,9 @@ describe('Express App', () => {
 
 });
 
+//This suite deals with the JWKS endpoints
 describe('JWKS Endpoint', () => {
+    //This test ensures that key properties are returned correctly
     test('it should return JWKS with the correct key properties', async () => {
       const response = await request(app).get('/.well-known/jwks.json');
       expect(response.statusCode).toBe(200);
@@ -67,6 +81,7 @@ describe('JWKS Endpoint', () => {
     
   });
   
+  //This test ensures the paylaod is correctly formatted
   describe('JWT Validation', () => {
     test('it should create a JWT with the correct format and payload', async () => {
       const response = await request(app).post('/auth').send({ /* ... */ });
@@ -88,15 +103,16 @@ describe('JWKS Endpoint', () => {
       // Implement the logic to use JWKS for verification
     });
   
-    // Add more tests here to check for expired token validation, etc.
+ 
     
   });
   
+//This test ensures that expired JWKS are not served
 test('Expired JWKS should not be served', async () => {
   
     const expiredToken = await generateExpiredTokenSomehow();
   
-    // Fetch JWKS
+   
     const jwksResponse = await request(app).get('/.well-known/jwks.json');
     expect(jwksResponse.statusCode).toBe(200);
   

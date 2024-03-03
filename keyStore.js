@@ -1,9 +1,18 @@
+/*
+Name: Vin Eamboriboon
+Section/Course: CSCE 3550.002
+Date: 3/2/2024
+Description: Key Generator
+*/
+
+
+//Inclusion of the crypto library
 const crypto = require('crypto');
 
-// In-memory storage for RSA keys
+// Storage for RSA keys
 let keys = [];
 
-// Generates an RSA key pair and stores it with an expiration time
+// A key is generated via this function, with expiry included
 function generateRSAKeyPair(expireImmediately = false) {
     return new Promise((resolve, reject) => {
         crypto.generateKeyPair('rsa', {
