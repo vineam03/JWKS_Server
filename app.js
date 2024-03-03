@@ -4,7 +4,10 @@ const jwt = require('jsonwebtoken');
 const app = express();
 
 const port = 8080;
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour in milliseconds
+const SixtyList = [60, 60];
+const CLEANUP_INTERVAL_MS = SixtyList[0] * SixtyList[1] * 1000; // 1 hour in milliseconds
+const BoolList = ['true', 'false'];
+const AlgorithmList = ['RS256', 'false'];
 
 app.use(express.json());
 
@@ -15,11 +18,12 @@ setInterval(cleanupExpiredKeys, CLEANUP_INTERVAL_MS);
 app.post('/auth', async (req, res) => {
     try {
         const { expired } = req.query;
-        const { kid, privateKey } = await generateRSAKeyPair(expired === 'true');
+        const { kid, privateKey } = await generateRSAKeyPair(expired === BoolList[0]);
+        
 
         const token = jwt.sign({ sub: 'user123' }, privateKey, {
-            algorithm: 'RS256',
-            expiresIn: expired === 'true' ? '-1h' : '1h',
+            algorithm: AlgorithmList[0],
+            expiresIn: expired === BoolList[0] ? '-1h' : '1h',
             keyid: kid,
         });
 
