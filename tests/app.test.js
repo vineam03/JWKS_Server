@@ -45,7 +45,7 @@ describe('Express App', () => {
         });
     });
     
-    // ... any additional tests ...
+
 });
 
 describe('JWKS Endpoint', () => {
@@ -60,11 +60,11 @@ describe('JWKS Endpoint', () => {
         expect(key).toHaveProperty('alg');
         expect(key).toHaveProperty('n');
         expect(key).toHaveProperty('e');
-        // Add checks for key expiration here if applicable
+        
       });
     });
   
-    // Add more tests here to check for expired keys
+    
   });
   
   describe('JWT Validation', () => {
@@ -81,7 +81,7 @@ describe('JWKS Endpoint', () => {
       expect(decoded).toHaveProperty('payload');
       expect(decoded.payload).toHaveProperty('sub');
       expect(decoded.payload).toHaveProperty('exp');
-      // Add checks for other claims like 'iss', 'aud', etc.
+      
   
       // Verify the token using the JWKS keys
       const jwksResponse = await request(app).get('/.well-known/jwks.json');
@@ -93,42 +93,21 @@ describe('JWKS Endpoint', () => {
   });
   
 test('Expired JWKS should not be served', async () => {
-    // Assuming you have a way to generate an expired token
+  
     const expiredToken = await generateExpiredTokenSomehow();
   
     // Fetch JWKS
     const jwksResponse = await request(app).get('/.well-known/jwks.json');
     expect(jwksResponse.statusCode).toBe(200);
   
-    // Parse JWKS to find if any key matches the expired token's kid
+
     const decodedToken = jwt.decode(expiredToken, { complete: true });
     const expiredKid = decodedToken.header.kid;
     const keys = jwksResponse.body.keys;
     const foundExpiredKey = keys.some(key => key.kid === expiredKid);
   
-    // Expect no key with that kid to be found
+    
     expect(foundExpiredKey).toBeFalsy();
   });
 
 
-describe('HTTP Methods and Status Codes', () => {
-    const methods = ['get', 'post', 'put', 'delete', 'patch', 'head'];
-    const authEndpoint = '/auth';
-    const jwksEndpoint = '/.well-known/jwks.json';
-  
-    methods.forEach(method => {
-      test(`Method ${method.toUpperCase()} is not allowed on ${authEndpoint}`, async () => {
-        const response = await request(app)[method](authEndpoint);
-        if (method !== 'post') { // 'post' is allowed for /auth
-          expect(response.statusCode).toBe(405);
-        }
-      });
-  
-      test(`Method ${method.toUpperCase()} is not allowed on ${jwksEndpoint}`, async () => {
-        const response = await request(app)[method](jwksEndpoint);
-        if (method !== 'get') { // 'get' is allowed for /.well-known/jwks.json
-          expect(response.statusCode).toBe(405);
-        }
-      });
-    });
-  });

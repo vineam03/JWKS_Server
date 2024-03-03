@@ -6,13 +6,13 @@ describe('Key Store', () => {
     expect(keyPair).toHaveProperty('kid');
     expect(keyPair).toHaveProperty('publicKey');
     expect(keyPair).toHaveProperty('privateKey');
-    // Add any additional checks you require
+  
   });
 
   test('getPublicKeysForJWKS should return a list of keys', () => {
     const jwks = getPublicKeysForJWKS();
     expect(Array.isArray(jwks)).toBe(true);
-    // You could add more checks to validate the structure of the JWKS
+    
   });
 
 

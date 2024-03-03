@@ -1,29 +1,21 @@
 const express = require('express');
-const { generateRSAKeyPair, getPublicKeysForJWKS } = require('./keyStore');
+const { generateRSAKeyPair, getPublicKeysForJWKS, cleanupExpiredKeys } = require('./keyStore');
 const jwt = require('jsonwebtoken');
 const app = express();
 
 const port = 8080;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour in milliseconds
 
 app.use(express.json());
 
-// Helper function to enforce allowed methods
-const enforceAllowedMethods = (allowedMethods) => {
-  return (req, res, next) => {
-    if (!allowedMethods.includes(req.method)) {
-      return res.status(405).send('Method Not Allowed');
-    }
-    next();
-  };
-};
+// Setup a cleanup interval to remove expired keys
+setInterval(cleanupExpiredKeys, CLEANUP_INTERVAL_MS);
 
-app.use('/auth', enforceAllowedMethods(['POST']));
-app.use('/.well-known/jwks.json', enforceAllowedMethods(['GET']));
-
+// Route for generating authentication tokens
 app.post('/auth', async (req, res) => {
     try {
         const { expired } = req.query;
-        const { kid, privateKey } = await generateRSAKeyPair();
+        const { kid, privateKey } = await generateRSAKeyPair(expired === 'true');
 
         const token = jwt.sign({ sub: 'user123' }, privateKey, {
             algorithm: 'RS256',
@@ -38,17 +30,16 @@ app.post('/auth', async (req, res) => {
     }
 });
 
+// Route for serving the JWKS
 app.get('/.well-known/jwks.json', (req, res) => {
-    const currentTimeInSeconds = Math.floor(Date.now() / 1000);
-    const jwks = {
-        keys: getPublicKeysForJWKS().filter(key => !key.exp || key.exp > currentTimeInSeconds) // Filter out expired keys
-    };
-    res.json(jwks);
+    const jwks = getPublicKeysForJWKS();
+    res.json({ keys: jwks });
 });
 
+// Start the server if not in test environment
 if (process.env.NODE_ENV !== 'test') {
     app.listen(port, () => {
-        console.log(`Listening on port ${port}`);
+        console.log(`Server listening on port ${port}`);
     });
 }
 
