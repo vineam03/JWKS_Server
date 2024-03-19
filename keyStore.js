@@ -1,18 +1,28 @@
-/*
-Name: Vin Eamboriboon
-Section/Course: CSCE 3550.002
-Date: 3/2/2024
-Description: Key Generator
-*/
-
-
-//Inclusion of the crypto library
 const crypto = require('crypto');
+const sqlite3 = require('sqlite3').verbose();
+const db = new sqlite3.Database('./totally_not_my_privateKeys.db', sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+    if (err) {
+        console.error(err.message);
+    } else {
+        console.log('Connected to the SQLite database.');
+        initializeDatabase(); // Ensure the database is initialized with the table
+    }
+});
 
-// Storage for RSA keys
-let keys = [];
+function initializeDatabase() {
+    db.run(`CREATE TABLE IF NOT EXISTS keys (
+        kid TEXT PRIMARY KEY,
+        publicKey TEXT NOT NULL,
+        privateKey TEXT NOT NULL,
+        alg TEXT NOT NULL,
+        exp INTEGER NOT NULL
+    )`, (err) => {
+        if (err) {
+            console.error('Error creating table:', err.message);
+        }
+    });
+}
 
-// A key is generated via this function, with expiry included
 function generateRSAKeyPair(expireImmediately = false) {
     return new Promise((resolve, reject) => {
         crypto.generateKeyPair('rsa', {
@@ -23,44 +33,55 @@ function generateRSAKeyPair(expireImmediately = false) {
             if (err) reject(err);
 
             const kid = crypto.randomBytes(16).toString('hex');
-            const exp = Date.now() + (expireImmediately ? -1000 : 3600000); // 1 hour in ms
-            const keyPair = { kid, publicKey, privateKey, alg: 'RS256', exp };
-            keys.push(keyPair);
-            resolve(keyPair);
+            const exp = Math.floor(Date.now() / 1000) + (expireImmediately ? -3600 : 3600); // 1 hour in seconds
+            const alg = 'RS256';
+            const keyPair = { kid, publicKey, privateKey, alg, exp };
+
+            db.run('INSERT INTO keys (kid, publicKey, privateKey, alg, exp) VALUES (?, ?, ?, ?, ?)', 
+            [kid, publicKey, privateKey, alg, exp], (err) => {
+                if (err) {
+                    console.error('Error inserting key:', err.message);
+                    reject(err);
+                } else {
+                    resolve(keyPair);
+                }
+            });
         });
     });
 }
 
-// Returns the public keys in JWKS format, excluding any that are expired
 function getPublicKeysForJWKS() {
-    const now = Date.now();
-    return keys
-        .filter(key => key.exp > now)
-        .map(({ kid, publicKey, alg }) => {
-            const { n, e } = crypto.createPublicKey(publicKey).export({ format: 'jwk' });
-            return {
-                kty: 'RSA',
-                kid,
-                alg,
-                use: 'sig',
-                n: base64url(n), // modulus
-                e: base64url(e)  // exponent
-            };
+    return new Promise((resolve, reject) => {
+        const now = Math.floor(Date.now() / 1000);
+        db.all('SELECT kid, publicKey, alg FROM keys WHERE exp > ?', [now], (err, rows) => {
+            if (err) {
+                reject(err);
+            } else {
+                const jwks = rows.map(({ kid, publicKey, alg }) => {
+                    const keyObj = crypto.createPublicKey(publicKey);
+                    const jwk = keyObj.export({ type: 'spki', format: 'jwk' });
+                    return {
+                        kty: jwk.kty,
+                        kid: kid,
+                        alg: alg,
+                        use: 'sig',
+                        n: jwk.n, // Assume these values are already base64url
+                        e: jwk.e,
+                    };
+                });
+                resolve({ keys: jwks }); // Wrap the keys in an object
+            }
         });
+    });
 }
 
-// Cleanup expired keys
 function cleanupExpiredKeys() {
-    const now = Date.now();
-    keys = keys.filter(key => key.exp > now);
-}
-
-// Base64 URL encode a buffer
-function base64url(buffer) {
-    return buffer.toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
+    const now = Math.floor(Date.now() / 1000);
+    db.run('DELETE FROM keys WHERE exp <= ?', [now], (err) => {
+        if (err) {
+            console.error('Error cleaning up keys:', err.message);
+        }
+    });
 }
 
 module.exports = { generateRSAKeyPair, getPublicKeysForJWKS, cleanupExpiredKeys };
