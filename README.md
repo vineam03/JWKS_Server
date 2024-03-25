@@ -1,9 +1,12 @@
+**IMPORTANT ENSURE THAT THE GO TEST CLIENT IS IN THE SAME DIRECTORY**
+
 This program sets up a RESTful JWKS server which issues out public keys to verfiy JWTs. 
 
 Features include:
 - Key Expiry
 - Authentication Endpoint
 - JWT Handler
+- SQLite Handler
 
 The program is divided into these following files: 
 
