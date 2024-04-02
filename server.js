@@ -1,198 +1,117 @@
-
-// server.js
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const bcrypt = require('bcrypt');
 const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+const rateLimit = require('express-rate-limit');
 const fs = require('fs');
+const path = require('path');
 
-// Path to the database file
-const dbPath = path.resolve(__dirname, 'totally_not_my_privateKeys.db');
-// Ensure the database file exists
-fs.closeSync(fs.openSync(dbPath, 'a'));
+// Constants
+const SECRET = 'your-256-bit-secret'; // Replace with actual secret key
+const DB_PATH = 'jwks_server.db';
+const APP_PORT = 8080;
 
+// Initialize Express app
 const app = express();
-const port = 8080;
+app.use(express.json());
 
-// Function to handle database operations safely
-function dbOperation(callback) {
-  const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, (err) => {
-    if (err) {
-      console.error("Database connection error:", err.message);
-      callback(err);
-      return;
-    }
-    callback(null, db);
-  });
-}
-
-// Initialize the database with the required table
-dbOperation((err, db) => {
+// Initialize and open database
+const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
   if (err) {
-    console.error("Initialization error:", err.message);
-    return;
+    console.error(err.message);
+    throw err;
   }
-  // Explicitly creating a table with parameterized query to avoid SQL injection
-  db.run(`CREATE TABLE IF NOT EXISTS keys (
-    kid TEXT PRIMARY KEY,
-    publicKey TEXT NOT NULL,
-    privateKey TEXT NOT NULL,
-    alg TEXT NOT NULL,
-    exp INTEGER NOT NULL
-  )`, (err) => {
-    if (err) {
-      console.error('Error creating table:', err.message);
-    }
-    db.close();
+
+  console.log('Connected to the SQLite database.');
+  db.serialize(() => {
+    db.run(`CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      email TEXT UNIQUE
+    )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS auth_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_ip TEXT NOT NULL,
+      request_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      user_id INTEGER,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
   });
 });
 
-app.use(express.json());
+// Rate limiter middleware
+const limiter = rateLimit({
+  windowMs: 1 * 1000, // 1 second
+  max: 10 // limit each IP to 10 requests per windowMs
+});
 
-// Helper function for base64url encoding
-function base64url(input) {
-  return input.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
+// Utility functions
+const encrypt = (text) => {
+  const cipher = crypto.createCipher('aes-256-cbc', SECRET);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return encrypted;
+};
 
-function generateRSAKeyPair(expireImmediately = false) {
-    return new Promise((resolve, reject) => {
-      crypto.generateKeyPair('rsa', {
-        modulusLength: 2048,
-        publicKeyEncoding: { type: 'spki', format: 'pem' },
-        privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-      }, (err, publicKey, privateKey) => {
-        if (err) {
-          console.error('Error generating key pair:', err);
-          reject(err);
-          return;
-        }
-  
-        const kid = crypto.randomBytes(16).toString('hex');
-        const exp = Math.floor(Date.now() / 1000) + (expireImmediately ? -3600 : 3600); // 1 hour in seconds
-        const alg = 'RS256';
-        const keyPair = { kid, publicKey, privateKey, alg, exp };
-  
-        console.log('Attempting to insert key pair:', keyPair);
-  
-        dbOperation((err, db) => {
-          if (err) {
-            console.error('Database operation error:', err);
-            reject(err);
-            return;
-          }
-          db.run('INSERT INTO keys (kid, publicKey, privateKey, alg, exp) VALUES (?, ?, ?, ?, ?)',
-          [kid, publicKey, privateKey, alg, exp], (err) => {
-            db.close();
-            if (err) {
-              console.error('Error inserting key pair:', err);
-              reject(err);
-            } else {
-              console.log('Key pair inserted successfully');
-              resolve(keyPair);
-            }
-          });
-        });
-      });
-    });
-  }
-// Function to get all valid public keys for JWKS
-function getPublicKeysForJWKS() {
-    return new Promise((resolve, reject) => {
-      const now = Math.floor(Date.now() / 1000);
-      dbOperation((err, db) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        
-        db.all("SELECT kid, publicKey, alg, 'NULL' AS additionalColumn1, 'NULL' AS additionalColumn2 FROM keys WHERE exp > ?", [now], (err, rows) => {
-          db.close();
-          if (err) {
-            reject(err);
-            return;
-          }
-          const jwks = rows.map(({ kid, publicKey, alg }) => {
-            const publicKeyObj = crypto.createPublicKey(publicKey);
-            const jwk = publicKeyObj.export({ type: 'spki', format: 'jwk' });
-            return {
-              kty: jwk.kty,
-              kid: kid.toString(), // Make sure kid is a string if it's not already
-              alg: alg,
-              use: 'sig',
-              n: base64url(jwk.n), // Convert to base64url format
-              e: base64url(jwk.e),
-              // The additional columns are not used here, but the 'NULL' values satisfy the expected schema
-            };
-          });
-          resolve(jwks);
-        });
-      });
-    });
-  }
-  
-  
-// Cleanup function for expired keys
-function cleanupExpiredKeys() {
-    const now = Math.floor(Date.now() / 1000);
-    console.log('Running cleanup for expired keys');
+const decrypt = (encrypted) => {
+  const decipher = crypto.createDecipher('aes-256-cbc', SECRET);
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+};
 
-    dbOperation((err, db) => {
+// Endpoint to handle user registration
+app.post('/register', (req, res) => {
+  const { username, email } = req.body;
+  const password = crypto.randomBytes(16).toString('hex');
+  const passwordHash = bcrypt.hashSync(password, 10);
+
+  db.run('INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)',
+    [username, passwordHash, email],
+    function (err) {
       if (err) {
-        console.error('Cleanup operation database error:', err);
+        res.status(400).json({ error: err.message });
         return;
       }
-      db.run('DELETE FROM keys WHERE exp <= ?', [now], (err) => {
-        db.close();
-        if (err) {
-          console.error('Error during cleanup of expired keys:', err);
-        } else {
-          console.log('Cleanup of expired keys done successfully');
-        }
-      });
-    });
-  }
+      res.status(201).json({ password: password });
+    }
+  );
+});
 
-  // Set a cleanup interval to remove expired keys
-  const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour in milliseconds
-  setInterval(cleanupExpiredKeys, CLEANUP_INTERVAL_MS);
-  
-  // POST endpoint for generating authentication tokens
-  app.post('/auth', async (req, res) => {
-    try {
-      const { expired } = req.query;
-      const { kid, privateKey } = await generateRSAKeyPair(expired === 'true');
-      const token = jwt.sign({ sub: 'user123' }, privateKey, {
-        algorithm: 'RS256',
-        expiresIn: expired === 'true' ? '-1h' : '1h',
-        keyid: kid
-      });
-  
-      res.json({ token });
-    } catch (error) {
-      console.error(error);
-      res.status(500).send('Internal Server Error');
+// Endpoint to generate JWT
+app.post('/auth', limiter, (req, res) => {
+  // Authenticate user...
+
+  // Log request
+  const ip = req.ip;
+  const userID = 1; // Replace with actual user ID after authentication
+
+  db.run('INSERT INTO auth_logs (request_ip, user_id) VALUES (?, ?)', [ip, userID], function (err) {
+    if (err) {
+      res.status(500).json({ error: 'Failed to log auth request' });
+      return;
     }
+    // Generate JWT token...
+    const token = jwt.sign({ data: 'data' }, SECRET, { expiresIn: '1h' }); // Customize payload as needed
+    res.json({ token: token });
   });
-  
-  // GET endpoint for serving JWKS
-  app.get('/.well-known/jwks.json', async (req, res) => {
-    try {
-      const jwks = await getPublicKeysForJWKS();
-      res.json({ keys: jwks });
-    } catch (error) {
-      console.error('Error serving JWKS:', error);
-      res.status(500).send('Internal server error');
-    }
-  });
-  
-// Start the server if not in test environment
-if (process.env.NODE_ENV !== 'test') {
-    app.listen(port, () => {
-      console.log(`Server listening on port ${port}`);
-    });
-  }
-  
-  module.exports = { app, generateRSAKeyPair, getPublicKeysForJWKS, cleanupExpiredKeys };
-  
-  
+});
+
+// Serve JWKS
+app.get('/.well-known/jwks.json', (req, res) => {
+  // Generate and serve JWKS...
+  const jwks = {
+    keys: [] // Add JWKS keys
+  };
+  res.json(jwks);
+});
+
+// Start the server
+app.listen(APP_PORT, () => {
+  console.log(`Server running on port ${APP_PORT}`);
+});
+
+module.exports = app;
